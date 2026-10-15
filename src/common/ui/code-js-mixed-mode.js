@@ -21,6 +21,7 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
   const kIndexOfJsExprStart = '#indexOfJsExprStart';
   const kJsExprDepthInStringTemplate = '#jsExprDepthInStringTemplate';
   const kJsExprStartConsumed = '#jsExprStartConsumed';
+  const kAsyncObjCtx = '#asyncObjCtx';
   const kJsState = '#jsState';
   const kLocalHtmlPlainStringEndPos = '#localHtmlPlainStringEndPos';
   const kLocalMode = '#localMode';
@@ -649,6 +650,32 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
     ],
   });
 
+  // CM5 objprop marks object-literal `async` modifiers as property (see GH codemirror#5396).
+  const RX_WS = '(\\s|\\/\\*(?:[^*]|\\*(?!\\/))*?\\*\\/)*';
+  const RX_ASYNC_ARROW = new RegExp(`^${RX_WS}\\([^)]*\\)${RX_WS}=>`);
+  const RX_METHOD_NAMED_ASYNC = new RegExp(`^${RX_WS}\\([^)]*\\)${RX_WS}\\{`);
+  const RX_OBJ_KEY = new RegExp(`^${RX_WS}[:,}]`);
+  const RX_ASYNC_GENERATOR = new RegExp(`^${RX_WS}\\*`);
+
+  /** @param {{ brace: number, expectProp: boolean }} ctx */
+  function trackObjectComma(ctx, token) {
+    if (token === '{') ctx.brace++;
+    else if (token === '}') ctx.brace = Math.max(0, ctx.brace - 1);
+    else if (token === ',' && ctx.brace > 0) ctx.expectProp = true;
+  }
+
+  function patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx) {
+    if (stream.current() !== 'async') return tokenStyle;
+    if (stream.match(RX_ASYNC_ARROW, false)) return 'keyword';
+    const inObj = jsState.lexical?.type === '}' || ctx.expectProp;
+    if (!inObj || stream.match(RX_OBJ_KEY, false)) return tokenStyle;
+    ctx.expectProp = false;
+    if (stream.match(RX_METHOD_NAMED_ASYNC, false)) return 'property';
+    if ((jsState.lastType === 'async' && tokenStyle === 'property')
+    || stream.match(RX_ASYNC_GENERATOR, false)) return 'keyword';
+    return tokenStyle;
+  }
+
   function jsToken(stream, state) {
     // adapt the existing jsMode tokenizer with the wrapper state
     let tokenStyle = null;
@@ -662,6 +689,10 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
         // so the local mode matcher will end up seeing previous token.
         return state[kJsState][kTokenize] === jsTokenQuasi ? 'string-2' : null;
       }
+      const jsState = state[kJsState];
+      const ctx = state[kAsyncObjCtx];
+      trackObjectComma(ctx, stream.current());
+      tokenStyle = patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx);
     }
     // optimization: short-circuit to skip local mode match when the rules won't cover
     // Note: if the rules change (the <start> ones), the conditions here might need to be updated accordingly.
@@ -686,6 +717,7 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
 
   return {
     startState: () => ({
+      [kAsyncObjCtx]: { brace: 0, expectProp: false },
       [kInJsExprInStringTemplate]: false,
       [kJsExprDepthInStringTemplate]: 0,
       [kJsExprStartConsumed]: false,
@@ -698,6 +730,7 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
     }),
 
     copyState: state => ({
+      [kAsyncObjCtx]: { ...state[kAsyncObjCtx] },
       [kInJsExprInStringTemplate]: state[kInJsExprInStringTemplate],
       [kJsExprDepthInStringTemplate]: state[kJsExprDepthInStringTemplate],
       [kJsExprStartConsumed]: state[kJsExprStartConsumed],

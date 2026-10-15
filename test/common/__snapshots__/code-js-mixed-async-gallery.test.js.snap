@@ -1,0 +1,144 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`gallery async/bar token styles 1`] = `
+[
+  {
+    "line": 1,
+    "rest": ": 4,",
+    "style": "property",
+    "text": "w",
+  },
+  {
+    "line": 2,
+    "rest": ": 1,",
+    "style": "property",
+    "text": "foo",
+  },
+  {
+    "line": 3,
+    "rest": " bar() {",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 3,
+    "rest": "() {},",
+    "style": "property",
+    "text": "bar",
+  },
+  {
+    "line": 4,
+    "rest": " async()",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 4,
+    "rest": "() {},",
+    "style": "property",
+    "text": "async",
+  },
+  {
+    "line": 5,
+    "rest": "() {},",
+    "style": "property",
+    "text": "async",
+  },
+  {
+    "line": 6,
+    "rest": ": true,",
+    "style": "variable",
+    "text": "async",
+  },
+  {
+    "line": 7,
+    "rest": ",",
+    "style": "variable",
+    "text": "async",
+  },
+  {
+    "line": 8,
+    "rest": ": 2",
+    "style": "variable",
+    "text": "bar",
+  },
+  {
+    "line": 10,
+    "rest": "({",
+    "style": "variable",
+    "text": "foo",
+  },
+  {
+    "line": 11,
+    "rest": ": async ",
+    "style": "property",
+    "text": "bar",
+  },
+  {
+    "line": 11,
+    "rest": " () => {",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 13,
+    "rest": "({",
+    "style": "variable",
+    "text": "foo",
+  },
+  {
+    "line": 14,
+    "rest": ": async ",
+    "style": "property",
+    "text": "bar",
+  },
+  {
+    "line": 14,
+    "rest": " ()",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 17,
+    "rest": "();",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 18,
+    "rest": " = o;",
+    "style": "def",
+    "text": "async",
+  },
+  {
+    "line": 19,
+    "rest": "() {}",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 21,
+    "rest": " * gen()",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 24,
+    "rest": " first()",
+    "style": "keyword",
+    "text": "async",
+  },
+  {
+    "line": 26,
+    "rest": "() {},",
+    "style": "property",
+    "text": "async",
+  },
+  {
+    "line": 28,
+    "rest": " (x) => ",
+    "style": "keyword",
+    "text": "async",
+  },
+]
+`;
