@@ -1,35 +1,51 @@
 import CodeMirror from 'codemirror';
 import '@/common/ui/code-js-mixed-mode';
 
-const gallery = `const o = {
-  w: 4,
-  foo: 1,
+const gallery = `const obj = {
+  // plain property keys
+  width: 4,
+  label: 1,
+
+  // modifier, then the method name
   async bar() {},
+  // modifier, then a method named async
   async async() {},
+  // method named async
   async() {},
+
+  // key, shorthand, and the following key
   async: true,
   async,
   bar: 2
 };
-foo({
+
+// arrow in an object
+fn({
   bar: async () => {},
 });
-foo({
+// arrow whose => is on the next line
+fn({
   bar: async ()
   => {},
 });
+// call
 async();
-const async = o;
+// const binding
+const async = obj;
+// function declaration
 function async() {}
-const g = {
+// async generator method
+const generators = {
   async * gen() {},
 };
-const a = {
+// method named async after a multiline method
+const afterMultiline = {
   async first() {
   },
   async() {},
 };
-baz({ qux: async (x) => x });`;
+// arrow with a parameter
+fn({ key: async (x) => x });`;
 
 function collectTokens(code, words) {
   const mode = CodeMirror.getMode({}, 'javascript-mixed');
@@ -53,18 +69,22 @@ function collectTokens(code, words) {
 }
 
 test('gallery async/bar token styles', () => {
-  const tokens = collectTokens(gallery, ['async', 'bar', 'foo', 'w']);
+  const tokens = collectTokens(gallery, ['async', 'bar', 'label', 'width', 'fn']);
   expect(tokens).toMatchSnapshot();
   const style = (line, text) => tokens.find(t => t.line === line && t.text === text)?.style;
-  // Core async-modifier fix (not CM5 variable vs property key coloring):
-  expect(style(3, 'async')).toBe('keyword'); // async bar()
-  const asyncOn4 = tokens.filter(t => t.line === 4 && t.text === 'async');
-  expect(asyncOn4[0]?.style).toBe('keyword'); // modifier
-  expect(asyncOn4[1]?.style).toBe('property'); // method name
-  expect(style(5, 'async')).toBe('property'); // method named async
-  expect(style(11, 'async')).toBe('keyword'); // bar: async () =>
-  expect(style(14, 'async')).toBe('keyword'); // split =>
-  expect(style(21, 'async')).toBe('keyword'); // async * gen
-  expect(style(28, 'async')).toBe('keyword'); // qux: async (x) =>
-  expect(style(26, 'async')).toBe('property'); // lone async() after multiline method + comma
+  expect(style(6, 'async')).toBe('keyword'); // async bar()
+  expect(style(13, 'async')).toBe('property'); // key after CM5 loses objprop
+  expect(style(14, 'async')).toBe('property'); // shorthand
+  expect(style(15, 'bar')).toBe('property');
+  const asyncModifierAndName = tokens.filter(t => t.line === 8 && t.text === 'async');
+  expect(asyncModifierAndName[0]?.style).toBe('keyword'); // modifier
+  expect(asyncModifierAndName[1]?.style).toBe('property'); // method name
+  expect(style(10, 'async')).toBe('property'); // method named async
+  expect(style(20, 'async')).toBe('keyword'); // bar: async () =>
+  expect(style(24, 'async')).toBe('keyword'); // split =>
+  expect(style(35, 'async')).toBe('keyword'); // async * gen
+  expect(style(44, 'async')).toBe('keyword'); // key: async (x) =>
+  expect(style(41, 'async')).toBe('property'); // lone async() after multiline method + comma
+  expect(style(28, 'async')).toBe('variable'); // async();
+  expect(style(32, 'async')).toBe('def'); // function async() {}
 });

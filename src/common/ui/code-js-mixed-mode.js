@@ -653,9 +653,12 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
   // CM5 objprop marks object-literal `async` modifiers as property (see GH codemirror#5396).
   const RX_WS = '(\\s|\\/\\*(?:[^*]|\\*(?!\\/))*?\\*\\/)*';
   const RX_ASYNC_ARROW = new RegExp(`^${RX_WS}\\([^)]*\\)${RX_WS}=>`);
+  const RX_ASYNC_FUNCTION = new RegExp(`^${RX_WS}function\\b`);
+  const RX_ASYNC_MODIFIER = new RegExp(`^${RX_WS}[\\w$\\[']`);
   const RX_METHOD_NAMED_ASYNC = new RegExp(`^${RX_WS}\\([^)]*\\)${RX_WS}\\{`);
   const RX_OBJ_KEY = new RegExp(`^${RX_WS}[:,}]`);
   const RX_ASYNC_GENERATOR = new RegExp(`^${RX_WS}\\*`);
+  const RX_ASYNC_CALL = new RegExp(`^${RX_WS}\\(`);
 
   /** @param {{ brace: number, expectProp: boolean }} ctx */
   function trackObjectComma(ctx, token) {
@@ -664,15 +667,40 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
     else if (token === ',' && ctx.brace > 0) ctx.expectProp = true;
   }
 
-  function patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx) {
+  function inObjectPropPosition(jsState, ctx) {
+    return ctx.brace > 0 && (ctx.expectProp || jsState.lexical?.type === '}');
+  }
+
+  function patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx, prevLastType) {
     if (stream.current() !== 'async') return tokenStyle;
     if (stream.match(RX_ASYNC_ARROW, false)) return 'keyword';
-    const inObj = jsState.lexical?.type === '}' || ctx.expectProp;
-    if (!inObj || stream.match(RX_OBJ_KEY, false)) return tokenStyle;
+    if (prevLastType === 'function') return 'def';
+    if (!inObjectPropPosition(jsState, ctx)) {
+      if (stream.match(RX_ASYNC_FUNCTION, false)) return 'keyword';
+      if (stream.match(RX_ASYNC_GENERATOR, false)) return 'keyword';
+      if (stream.match(RX_ASYNC_MODIFIER, false)) return 'keyword';
+      if (stream.match(RX_ASYNC_CALL, false)) return 'variable';
+      return tokenStyle;
+    }
+    if (stream.match(RX_OBJ_KEY, false)) {
+      ctx.expectProp = false;
+      return 'property';
+    }
     ctx.expectProp = false;
     if (stream.match(RX_METHOD_NAMED_ASYNC, false)) return 'property';
     if ((jsState.lastType === 'async' && tokenStyle === 'property')
     || stream.match(RX_ASYNC_GENERATOR, false)) return 'keyword';
+    return tokenStyle;
+  }
+
+  // CM5 can leave objprop after `async async() {}`; brace depth still tracks the literal.
+  function patchObjPropTokenStyle(tokenStyle, stream, jsState, ctx) {
+    if (tokenStyle !== 'variable' || stream.current() === 'async') return tokenStyle;
+    if (!ctx.expectProp || ctx.brace <= 0) return tokenStyle;
+    if (stream.match(RX_OBJ_KEY, false) || stream.match(RX_METHOD_NAMED_ASYNC, false)) {
+      ctx.expectProp = false;
+      return 'property';
+    }
     return tokenStyle;
   }
 
@@ -682,17 +710,19 @@ CodeMirror.defineMode('javascript-mixed', (config) => {
     if (!state[kLocalMode]) {
       // when in local html/css context, skip js parsing,
       // so as not to mess up js tokenizer's state.
-      tokenStyle = jsMode.token(stream, state[kJsState]);
+      const jsState = state[kJsState];
+      const prevLastType = jsState.lastType;
+      tokenStyle = jsMode.token(stream, jsState);
       if (tokenStyle === null) {
         // case the token is not relevant semantically, e.g., space or line break;
         // just return, skip local mode match, as such token is not reflected in stream/state
         // so the local mode matcher will end up seeing previous token.
-        return state[kJsState][kTokenize] === jsTokenQuasi ? 'string-2' : null;
+        return jsState[kTokenize] === jsTokenQuasi ? 'string-2' : null;
       }
-      const jsState = state[kJsState];
       const ctx = state[kAsyncObjCtx];
       trackObjectComma(ctx, stream.current());
-      tokenStyle = patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx);
+      tokenStyle = patchAsyncTokenStyle(tokenStyle, stream, jsState, ctx, prevLastType);
+      tokenStyle = patchObjPropTokenStyle(tokenStyle, stream, jsState, ctx);
     }
     // optimization: short-circuit to skip local mode match when the rules won't cover
     // Note: if the rules change (the <start> ones), the conditions here might need to be updated accordingly.
