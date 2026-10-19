@@ -114,6 +114,12 @@
         <setting-text :name="kScriptTemplate" has-reset/>
       </section>
 
+      <section>
+        <h3>Custom Utility Script Template</h3>
+        <p>Used when creating a <code>New utility</code> script. Must use <code>==UtilityScript==</code>.</p>
+        <setting-text :name="kUtilityScriptTemplate" has-reset/>
+      </section>
+
       <vm-blacklist />
 
       <section>
@@ -131,7 +137,8 @@ import browser from '@/common/browser';
 import { kDownloads, KNOWN_INJECT_INTO, VM_DOCS_INJECT_INTO } from '@/common/consts';
 import options from '@/common/options';
 import {
-  kGmCookieHttpOnly, kGmDownloadViaApi, kScriptTemplate, kUpdateCron, kUpdateEnabledScriptsOnly,
+  kGmCookieHttpOnly, kGmDownloadViaApi, kScriptTemplate, kUtilityScriptTemplate, kUpdateCron,
+  kUpdateEnabledScriptsOnly,
 } from '@/common/options-defaults';
 import { keyboardService } from '@/common/keyboard';
 import { EXTERNAL_LINK_PROPS, focusMe, getActiveElement } from '@/common/ui';

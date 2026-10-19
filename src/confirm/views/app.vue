@@ -203,6 +203,7 @@ let guard;
 let infoVal;
 let lastScriptId;
 let requireCache, requireUrls;
+let utilityUrls;
 let resourceCache, resourceUrls;
 let trackingPromise;
 
@@ -334,6 +335,7 @@ async function parseMeta() {
   script.value = { meta: meta || {}, custom: {}, props: {} };
   if (meta) {
     requireUrls = [...new Set(meta.require)];
+    utilityUrls = [...new Set(meta.requireUtility || [])];
     resourceUrls = [...new Set(Object.values(meta.resources))];
   }
   if (!name) heading.value = i18n('msgInvalidScript');
@@ -344,6 +346,7 @@ async function loadDeps() {
     loadScriptIcon(script.value).then(url => { safeIcon.value = url; });
   }
   if (requireCache
+  && !utilityUrls?.length
   && deepEqual([...requireUrls].sort(), Object.keys(requireCache).sort())
   && deepEqual([...resourceUrls].sort(), Object.keys(resourceCache).sort())) {
     return;
@@ -351,7 +354,7 @@ async function loadDeps() {
   requireCache = {};
   resourceCache = {};
   let finished = 0;
-  const length = requireUrls.length + resourceUrls.length;
+  const length = requireUrls.length + (utilityUrls?.length || 0) + resourceUrls.length;
   // All resources may finish quickly so we delay the status to avoid flicker
   const STATUS_DELAY = 500;
   const startTime = performance.now();
@@ -373,8 +376,21 @@ async function loadDeps() {
       return url;
     }
   };
+  const loadUtility = async ref => {
+    const depsUrl = `2${ref}`;
+    try {
+      const util = await sendCmdDirectly('GetUtilityRequireScript', ref);
+      deps.value[depsUrl] = util?.code ?? false;
+      finished += 1;
+      updateStatus();
+    } catch (e) {
+      deps.value[depsUrl] = false;
+      return ref;
+    }
+  };
   const delayedStatus = setTimeout(updateStatus, STATUS_DELAY);
   const promises = [
+    ...(utilityUrls || []).map(ref => loadUtility(ref)),
     ...requireUrls.map(url => download(url, requireCache, false)),
     ...resourceUrls.map(url => download(url, resourceCache, true)),
   ];

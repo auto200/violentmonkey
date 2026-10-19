@@ -82,7 +82,9 @@ import './code-autocomplete';
 import CodeMirror from 'codemirror';
 import cmDefaults from './code-defaults';
 import './code-js-mixed-mode';
-import { getUserScriptMetaHint } from './code-userscript-hint';
+import {
+  getUserScriptMetaHint, isRequireUtilityValueContext, UTILITY_REQUIRE_REFS,
+} from './code-userscript-hint';
 import { killTrailingSpaces } from './code-trailing-spaces';
 
 // Make sure this is still the longest line in the doc
@@ -102,10 +104,13 @@ Object.assign(CodeMirror.keyMap.sublime, {
   'Shift-Ctrl-/': 'commentSelection',
 });
 CodeMirror.registerHelper('hint', 'autoHintWithFallback', (cm, ...args) => {
+  const utilValues = isRequireUtilityValueContext(cm);
   let result = getUserScriptMetaHint(cm) || cm.getHelper(cm.getCursor(), 'hint')?.(cm, ...args);
   // fallback to anyword if default returns nothing (or no default)
-  result = result?.list.length ? result : CodeMirror.hint.anyword(cm, ...args);
-  if (result) {
+  if (!result?.list.length && !utilValues) {
+    result = CodeMirror.hint.anyword(cm, ...args);
+  }
+  if (result && !utilValues) {
     const { from: { ch, line }, list } = result;
     const prev = cm.getRange({ch: ch < 3 ? ch : ch - 3, line}, result.to);
     const prefix = ch < 3 ? prev : prev.slice(3);
@@ -117,7 +122,7 @@ CodeMirror.registerHelper('hint', 'autoHintWithFallback', (cm, ...args) => {
       }
     }
   }
-  return result;
+  return result?.list?.length ? result : null;
 });
 </script>
 
@@ -150,6 +155,8 @@ const props = defineProps({
     default: null,
   },
   cmOptions: Object,
+  /** `namespace/name` refs for `@require-utility` autocomplete in UserScript blocks. */
+  utilityRequireRefs: Array,
 });
 const emit = defineEmits(['code-dirty', 'ready']);
 
@@ -285,6 +292,7 @@ function renderPlaceholders() {
 function initialize() {
   maxDisplayLength = cm.options.maxDisplayLength;
   watchEffect(() => cm.setOption('readOnly', props.readOnly));
+  watchEffect(() => cm.setOption(UTILITY_REQUIRE_REFS, props.utilityRequireRefs || []));
   // these are active in all nav tabs
   cm.setOption('extraKeys', {
     Esc,

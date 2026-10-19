@@ -1,7 +1,8 @@
 import { compareVersion, getScriptName, getScriptUpdateUrl, i18n, trueJoin } from '@/common';
 import {
-  __CODE, FETCH_OPTS, METABLOCK_RE, NO_CACHE, TIMEOUT_MAX,
+  __CODE, FETCH_OPTS, NO_CACHE, TIMEOUT_MAX,
 } from '@/common/consts';
+import { stripScriptMetablock } from '@/common/metablock';
 import {
   getMissedCronTime, getNextCronTime, normalizeUpdateCron,
 } from '@/common/cron';
@@ -145,7 +146,7 @@ async function downloadUpdate(script, urls, opts) {
       announce(i18n('msgNoUpdate'), { [kChecking]: false });
     } else if (!downloadURL) {
       announce(i18n('msgNewVersion'), { [kChecking]: false });
-    } else if (downloadURL === updateURL && data?.replace(METABLOCK_RE, '').trim()) {
+    } else if (downloadURL === updateURL && stripScriptMetablock(data || '').trim()) {
       // Code is present, so this is not a smart server, hence the response is the entire script
       announce(i18n('msgUpdated'));
       return data;

@@ -2,21 +2,40 @@ import {
   encodeFilename, getFullUrl, getScriptHome, getScriptSupportUrl, getTab, i18n,
 } from '@/common';
 import {
-  __CODE, GLOB_ALL, HOMEPAGE_URL, INFERRED, kOrigTag, METABLOCK_RE, SUPPORT_URL,
+  __CODE, GLOB_ALL, HOMEPAGE_URL, INFERRED, kOrigTag, kRequireUtility, kUtilityScript,
+  SUPPORT_URL,
 } from '@/common/consts';
+import { matchAnyMetablock, matchScriptMetablock } from '@/common/metablock';
+import { parseUtilityRequire } from '@/common/utility-require';
 import { formatDate } from '@/common/date';
 import { mapEntry } from '@/common/object';
-import defaults, { kScriptTemplate } from '@/common/options-defaults';
+import defaults, { kScriptTemplate, kUtilityScriptTemplate } from '@/common/options-defaults';
 import { defaultMetaType, metaOptionalTypes, metaTypes } from '@/common/userscript-meta';
+import {
+  applyUtilityScriptRules,
+  isUtilityScript,
+  sanitizeUtilityCustom,
+  sanitizeUtilityMeta,
+  sanitizeUtilityMetablock,
+} from '@/common/utility-meta';
+export {
+  applyUtilityScriptRules,
+  isUtilityScript,
+  sanitizeUtilityCustom,
+  sanitizeUtilityMeta,
+  sanitizeUtilityMetablock,
+};
 import broadcast from './broadcast';
 import { addOwnCommands, commands } from './init';
 import { getOption, hookOptionsInit } from './options';
 import storage, { S_MOD_PRE, S_SCRIPT_PRE } from './storage';
 import { injectableRe } from './tabs';
+import { testScript, testerBatch } from './tester';
 
 addOwnCommands({
-  async NewScript({ code, tabId }) {
+  async NewScript({ code, tabId, utility }) {
     if (code) return newScriptFromCode(code);
+    if (utility) return newUtilityScript();
     const tab = tabId >= 0 && await getTab(tabId) || {};
     const tabUrl = tab.url;
     const url = injectableRe.test(tabUrl) && `${tabUrl.split(/[#?]/)[0]}*`;
@@ -29,6 +48,16 @@ addOwnCommands({
   },
 });
 
+const ERR_UTILITY_TEMPLATE = 'The utility script template must use // ==UtilityScript== ... ==/UtilityScript==';
+
+export function validateUtilityTemplate(tpl) {
+  const errors = [];
+  const meta = !tpl /*empty = default*/ || parseMeta(tpl, { errors });
+  if (!meta) errors.unshift(i18n('msgInvalidScript'));
+  else if (!meta[kUtilityScript]) errors.push(ERR_UTILITY_TEMPLATE);
+  if (errors.length) throw errors;
+}
+
 hookOptionsInit((changes, firstRun) => {
   if (!firstRun && kScriptTemplate in changes) {
     const errors = [];
@@ -36,6 +65,9 @@ hookOptionsInit((changes, firstRun) => {
     const meta = !tpl /*empty = default*/ || parseMeta(tpl, { errors });
     if (!meta) errors.unshift(i18n('msgInvalidScript'));
     if (errors.length) throw errors;
+  }
+  if (!firstRun && kUtilityScriptTemplate in changes) {
+    validateUtilityTemplate(changes[kUtilityScriptTemplate]);
   }
 });
 
@@ -48,7 +80,7 @@ export const aliveScripts = [];
 /** @type {VMScript[]} */
 export const removedScripts = [];
 /** @return {boolean|?RegExpExecArray} */
-export const matchUserScript = text => !/^\s*</.test(text) /*HTML*/ && METABLOCK_RE.exec(text);
+export const matchUserScript = matchAnyMetablock;
 
 /**                   0         1       2          3     4 */
 const META_ITEM_RE = /(?:^|\n)(.*?)\/\/([\x20\t]*)(@\S+)(.*)/g;
@@ -66,8 +98,9 @@ export const ERR_META_SPACE_INSIDE = 'Expected a single space after "//" in ';
 export function parseMeta(code, { errors, retDefault, retMetaStr } = {}) {
   // initialize meta
   const meta = metaTypes::mapEntry(value => value.default());
-  const match = matchUserScript(code);
-  if (!match) return retDefault ? meta : false;
+  const block = matchScriptMetablock(code);
+  if (!block) return retDefault ? meta : false;
+  const { match, utility } = block;
   // TODO: use `null` instead of `false` + null check in all callers?
   if (errors) checkMetaItemErrors(match, 1, errors);
   let parts;
@@ -85,6 +118,7 @@ export function parseMeta(code, { errors, retDefault, retMetaStr } = {}) {
   if (errors) checkMetaItemErrors(match, 5, errors);
   meta.resources = meta.resource;
   delete meta.resource;
+  if (utility) meta[kUtilityScript] = true;
   if (retMetaStr) meta[__CODE] = match[0];
   return meta;
 }
@@ -104,6 +138,40 @@ function clipString(line, maxLen) {
   return JSON.stringify(line.length > maxLen ? line.slice(0, maxLen) + '...' : line);
 }
 
+/**
+ * @param {string | {code:string, custom:VMScript['custom']}} src
+ * @return {{ meta: VMScript['meta'], errors: string[] | null }}
+ */
+export function parseMetaWithErrors(src) {
+  const isObj = isObject(src);
+  const custom = isObj && src.custom || getDefaultCustom();
+  const errors = [];
+  const meta = parseMeta(isObj ? src.code : src, { errors });
+  if (meta) {
+    if (meta[kUtilityScript]) {
+      sanitizeUtilityMeta(meta);
+    } else {
+      if (meta.grant.includes('none') && new Set(meta.grant).size > 1) {
+        errors.push(i18n('hintGrantNone'));
+      }
+      for (const ref of meta[kRequireUtility] || []) {
+        if (!parseUtilityRequire(ref)) {
+          errors.push(`Invalid @require-utility: ${ref}`);
+        }
+      }
+      testerBatch(errors);
+      testScript('', { meta, custom });
+      testerBatch();
+    }
+  } else {
+    errors.push(i18n('labelNoName')); // used by confirm app
+  }
+  return {
+    meta,
+    errors: errors.length ? errors : null,
+  };
+}
+
 export function getDefaultCustom() {
   return {
     origInclude: true,
@@ -114,6 +182,14 @@ export function getDefaultCustom() {
   };
 }
 
+function applyScriptTemplate(tpl, state) {
+  return tpl.replace(/{{(\w+)(?::(.+?))?}}/g, (str, name, format) => state[name] ?? (
+    name !== 'date' ? str
+      : format ? formatDate(format)
+        : new Date().toLocaleString()
+  ));
+}
+
 /** @return {VMScript & { code?: string }} */
 export function newScript(data) {
   const state = {
@@ -121,14 +197,25 @@ export function newScript(data) {
     name: '',
     ...data,
   };
-  const code = (getOption(kScriptTemplate) || defaults[kScriptTemplate])
-  .replace(/{{(\w+)(?::(.+?))?}}/g, (str, name, format) => state[name] ?? (
-    name !== 'date' ? str
-      : format ? formatDate(format)
-        : new Date().toLocaleString()
-  ));
+  const code = applyScriptTemplate(getOption(kScriptTemplate) || defaults[kScriptTemplate], state);
   const script = newScriptFromCode(code);
   if (data) script.code = code;
+  return script;
+}
+
+/** @return {VMScript & { code?: string }} */
+export function newUtilityScript(data) {
+  const state = {
+    name: '',
+    ...data,
+  };
+  const code = applyScriptTemplate(
+    getOption(kUtilityScriptTemplate) || defaults[kUtilityScriptTemplate],
+    state,
+  );
+  const script = newScriptFromCode(code);
+  script.config.shouldUpdate = 0;
+  script.code = code;
   return script;
 }
 

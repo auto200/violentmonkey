@@ -11,6 +11,7 @@ export const kPageMenuCommands = 'pageMenuCommands';
 export const kPopupWidth = 'popupWidth';
 export const kShowTrailingSpace = 'showTrailingSpace';
 export const kScriptTemplate = 'scriptTemplate';
+export const kUtilityScriptTemplate = 'utilityScriptTemplate';
 export const kUpdateEnabledScriptsOnly = 'updateEnabledScriptsOnly';
 export const kUpdateCron = 'updateCron';
 export const kValueEditor = 'valueEditor';
@@ -85,6 +86,8 @@ export default {
     viewSingleColumn: false,
     /** @type {boolean} */
     viewTable: false,
+    /** @type {boolean} */
+    showUtilitiesOnly: false,
   },
   [kFiltersPopup]: {
     /** @type {'exec' | 'alpha'} */
@@ -113,6 +116,15 @@ export default {
 // @author      -
 // @description
 // ==/UserScript==
+`,
+  [kUtilityScriptTemplate]: `\
+// ==UtilityScript==
+// @name        New library script
+// @namespace   UtilityScripts
+// @version     1.0.0
+//
+// @description
+// ==/UtilityScript==
 `,
   showAdvanced: true,
   [kValueEditor]: {

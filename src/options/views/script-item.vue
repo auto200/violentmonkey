@@ -8,6 +8,7 @@
       error: script.error,
       focused: focused,
       hotkeys: focused && showHotkeys,
+      utility: isUtility,
     }"
     :tabIndex
     @focus="setScriptFocus(true)"
@@ -29,6 +30,7 @@
         <template v-else>{{n}}</template>
       </a>
       <div class="script-tags" v-if="canRender">
+        <span v-if="isUtility" class="script-badge utility">Utility</span>
         <a
           v-for="(item, i) in cache[kTag].slice(0, 2)"
           :key="i"
@@ -158,6 +160,7 @@
 <script>
 import { formatTime, getLocaleString, getScriptHome, getScriptSupportUrl, i18n } from '@/common';
 import { INFERRED, kTag } from '@/common/consts';
+import { isUtilityScript } from '@/common/utility-meta';
 import { EXTERNAL_LINK_PROPS, getActiveElement, showConfirmation } from '@/common/ui';
 import { isInput, keyboardService, toggleTip } from '@/common/keyboard';
 import { kDescription, store, TOGGLE_OFF, TOGGLE_ON } from '../utils';
@@ -199,6 +202,7 @@ const $root = ref();
 const canRender = ref(props.visible);
 const isEnabled = computed(() => props.script.config.enabled);
 const isRemoved = computed(() => props.script.config.removed);
+const isUtility = computed(() => isUtilityScript(props.script.meta));
 const showRecycle = computed(() => store.route.paths[0] === TAB_RECYCLE);
 const author = computed(() => {
   const text = props.script.meta.author;
@@ -648,6 +652,16 @@ $removedItemHeight: calc(
       }
       &.removed .script-buttons .sep {
         display: none;
+      }
+      &-badge {
+        &.utility {
+          font-size: .85em;
+          padding: 0 .45em;
+          border-radius: .25em;
+          border: 1px solid var(--fill-5);
+          color: var(--fill-7);
+          margin-right: .35em;
+        }
       }
       &-message {
         position: absolute;

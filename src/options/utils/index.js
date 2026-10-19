@@ -73,6 +73,9 @@ export function markRemove(script, removed) {
   });
 }
 
+export { filterUtilityScripts } from './utility-list';
+export { findUtilityConsumers } from './utility-consumers';
+
 /**
  * @param {UIScript[]} scripts
  */

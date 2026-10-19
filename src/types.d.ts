@@ -225,6 +225,7 @@ declare interface VMScript {
     name: string;
     noframes?: boolean;
     require: string[];
+    requireUtility: string[];
     resources: StringMap;
     runAt?: VMScriptRunAt;
     supportURL?: string;

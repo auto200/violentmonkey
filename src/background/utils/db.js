@@ -4,16 +4,26 @@ import {
   makePause, trueJoin,
 } from '@/common';
 import {
-  CACHE_KEYS, FETCH_OPTS, INFERRED, kDownloads, kTag, PROMISE, REQ_KEYS, TIMEOUT_24HOURS,
-  TIMEOUT_WEEK, TL_AWAIT, VALUE_IDS,
+  CACHE_KEYS, FETCH_OPTS, INFERRED, kDownloads, kTag, kUtilityScript, PROMISE, REQ_KEYS,
+  TIMEOUT_24HOURS, TIMEOUT_WEEK, TL_AWAIT, VALUE_IDS,
 } from '@/common/consts';
+import { inferUtilityScriptFromCode } from '@/common/metablock';
+import {
+  applyUtilityScriptRules, sanitizeUtilityCustom, sanitizeUtilityMeta,
+} from '@/common/utility-meta';
+import { utilityRequireKey } from '@/common/utility-require';
+import {
+  findUtilityScript, getUtilityRequireScript, isUtilityRequireKey, parseUtilityRequire,
+  resolveUtilityRequire, utilityRequireRefFromKey,
+} from './utility-require';
+export { parseMetaWithErrors } from './script';
 import { deepSize, forEachEntry, forEachKey, forEachValue } from '@/common/object';
 import { isGmStorageGranted } from '@/common/script';
 import pluginEvents from '../plugin/events';
 import broadcast from './broadcast';
 import {
-  aliveScripts, getDefaultCustom, getNameURI, inferScriptProps, newScript, parseMeta,
-  removedScripts, scriptMap, scriptSiteVisited,
+  aliveScripts, getDefaultCustom, getNameURI, inferScriptProps, isUtilityScript, newScript,
+  parseMeta, parseMetaWithErrors, removedScripts, scriptMap, scriptSiteVisited,
 } from './script';
 import { testBlacklist, testerBatch, testScript } from './tester';
 import { getImageData } from './icon';
@@ -83,6 +93,9 @@ addOwnCommands({
     return storage[S_CODE][Array.isArray(id) ? 'getMulti' : 'getOne'](id);
   },
   GetTags: () => getScriptsTags(aliveScripts),
+  /** @param {string} url */
+  GetRequireContent: url => storage[S_REQUIRE].getOne(url),
+  GetUtilityRequireScript: getUtilityRequireScript,
   /** @return {Promise<void>} */
   async MarkRemoved({ id, removed }) {
     if (!removed) {
@@ -192,9 +205,20 @@ export async function initializeDatabase(reset) {
       (script.config.removed ? removedScripts : aliveScripts).push(script);
       // listing all known resource urls in order to remove unused mod keys
       if (!meta.require) meta.require = [];
+      if (!meta.requireUtility) meta.requireUtility = [];
       if (!meta.resources) meta.resources = {};
       if (TL_AWAIT in meta) meta[TL_AWAIT] = true; // a string if the script was saved in old VM
       meta.grant = [...new Set(meta.grant || [])]; // deduplicate
+      if (!meta[kUtilityScript]) {
+        const code = data[storage[S_CODE].toKey(id)];
+        if (typeof code === 'string' && inferUtilityScriptFromCode(meta, code)) {
+          meta[kUtilityScript] = true;
+        }
+      }
+      if (meta[kUtilityScript]) {
+        sanitizeUtilityMeta(meta);
+        sanitizeUtilityCustom(custom);
+      }
     }
   });
   initOptions(data, installedOver, installedOver && installedOver !== NEW_INSTALL);
@@ -332,7 +356,8 @@ export function getScriptsByURL(url, isTop, errors, prevIds) {
       meta,
       props: { id },
     } = script;
-    if ((prevIds ? id in prevIds : !enabled)
+    if (isUtilityScript(meta)
+    || (prevIds ? id in prevIds : !enabled)
     || !((isTop || !(custom.noframes ?? meta.noframes)) && testScript(url, script))) {
       continue;
     }
@@ -363,6 +388,13 @@ export function getScriptsByURL(url, isTop, errors, prevIds) {
         if (!clipboardChecked && (g === 'GM_setClipboard' || g === 'GM.setClipboard')) {
           clipboardChecked = envStart.clipFF = true;
         }
+      }
+    }
+    for (const ref of meta.requireUtility) {
+      const key = utilityRequireKey(ref);
+      if (!env[REQ_KEYS].includes(key)) {
+        env[REQ_KEYS].push(key);
+        (depsMap[key] || (depsMap[key] = [])).push(id);
       }
     }
     for (const [list, name, dataUriDecoder] of [
@@ -410,15 +442,21 @@ export function getScriptsByURL(url, isTop, errors, prevIds) {
 
 async function readEnvironmentData(env) {
   const keys = [];
+  const utilityRequireKeys = [];
   for (const [area, listName] of STORAGE_ROUTES_ENTRIES) {
     for (const id of env[listName]) {
-      keys.push(storage[area].toKey(id));
+      if (area === S_REQUIRE && isUtilityRequireKey(id)) {
+        utilityRequireKeys.push(id);
+      } else {
+        keys.push(storage[area].toKey(id));
+      }
     }
   }
   const data = await storage.api.get(keys);
   const badScripts = new Set();
   for (const [area, listName] of STORAGE_ROUTES_ENTRIES) {
     for (const id of env[listName]) {
+      if (area === S_REQUIRE && isUtilityRequireKey(id)) continue;
       let val = data[storage[area].toKey(id)];
       if (!val && area === S_VALUE) val = {};
       // {} enables tracking in addValueOpener
@@ -430,6 +468,14 @@ async function readEnvironmentData(env) {
           env.depsMap[id]?.forEach(scriptId => badScripts.add(scriptId));
         }
       }
+    }
+  }
+  for (const key of utilityRequireKeys) {
+    const ref = utilityRequireRefFromKey(key);
+    const val = ref && await resolveUtilityRequire(ref);
+    env[S_REQUIRE][key] = val;
+    if (val == null) {
+      env.depsMap[key]?.forEach(scriptId => badScripts.add(scriptId));
     }
   }
   if (badScripts.size) {
@@ -532,9 +578,16 @@ export function getSizes(ids) {
     scriptSizes[S_CODE_PRE + id] || 0,
     deepSize(scripts[i]),
     scriptSizes[S_VALUE_PRE + id] || 0,
-    meta.require.reduce(getSizeForRequires, { len: 0, pathMap }).len,
+    meta.requireUtility.reduce(getSizeForUtilityRequires, { len: 0 }).len
+    + meta.require.reduce(getSizeForRequires, { len: 0, pathMap }).len,
     Object.values(meta.resources).reduce(getSizeForResources, { len: 0, pathMap }).len,
   ]);
+}
+
+function getSizeForUtilityRequires(accum, ref) {
+  const script = findUtilityScript(parseUtilityRequire(ref) || {});
+  accum.len += (script && scriptSizes[S_CODE_PRE + script.props.id] || 0) + ref.length;
+  return accum;
 }
 
 function getSizeForRequires(accum, url) {
@@ -597,31 +650,6 @@ export async function updateScriptInfo(id, data) {
 }
 
 /**
- * @param {string | {code:string, custom:VMScript['custom']}} src
- * @return {{ meta: VMScript['meta'], errors: string[] }}
- */
-function parseMetaWithErrors(src) {
-  const isObj = isObject(src);
-  const custom = isObj && src.custom || getDefaultCustom();
-  const errors = [];
-  const meta = parseMeta(isObj ? src.code : src, { errors });
-  if (meta) {
-    if (meta.grant.includes('none') && new Set(meta.grant).size > 1) {
-      errors.push(i18n('hintGrantNone'));
-    }
-    testerBatch(errors);
-    testScript('', { meta, custom });
-    testerBatch();
-  } else {
-    errors.push(i18n('labelNoName')); // used by confirm app
-  }
-  return {
-    meta,
-    errors: errors.length ? errors : null,
-  };
-}
-
-/**
  * @param {VMScriptSourceOptions} src
  * @return {Promise<{
  *   errors: string[],
@@ -637,7 +665,10 @@ export async function parseScript(src) {
     message: src.message == null ? i18n('msgUpdated') : src.message || '',
   };
   const result = { errors, update };
-  const { [S_CODE]: code, update: srcUpdate } = src;
+  let { [S_CODE]: code, update: srcUpdate } = src;
+  if (meta[kUtilityScript]) {
+    code = applyUtilityScriptRules(meta, null, code);
+  }
   const now = Date.now();
   let { id } = src;
   let script;
@@ -690,6 +721,10 @@ export async function parseScript(src) {
   config.removed = 0; // force-resetting `removed` since this is an installation
   config.shouldUpdate = getInt(config.shouldUpdate);
   script.meta = meta;
+  if (meta[kUtilityScript]) {
+    sanitizeUtilityCustom(custom);
+    if (result.isNew) config.shouldUpdate = 0;
+  }
   props.uri = getNameURI(script); // DANGER! Must be after props.position and meta assignments.
   delete custom.from; // remove the old installation URL if any
   if (!getScriptHome(script) && isRemote(src.from)) {
@@ -745,6 +780,7 @@ function buildPathMap(script, base) {
  */
 export async function fetchResources(script, src) {
   const { custom, meta } = script;
+  if (meta[kUtilityScript]) return;
   const { pathMap } = custom;
   const { resources } = meta;
   const icon = custom.icon || meta.icon;
@@ -907,7 +943,13 @@ export async function vacuum(data) {
     touch(S_CODE_PRE, id, id);
     touch(S_MOD_PRE, id, id);
     touch(S_VALUE_PRE, id, id);
-    meta.require.forEach(url => touch(S_REQUIRE_PRE, url, id, pathMap));
+    meta.requireUtility.forEach(ref => {
+      const script = findUtilityScript(parseUtilityRequire(ref) || {});
+      if (script) touch(S_CODE_PRE, script.props.id, id);
+    });
+    meta.require.forEach(url => {
+      touch(S_REQUIRE_PRE, url, id, pathMap);
+    });
     meta.resources::forEachValue(url => touch(S_CACHE_PRE, url, id, pathMap));
     if (isRemote(icon)) touch(S_CACHE_PRE, icon, id, pathMap);
   });

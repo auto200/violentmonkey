@@ -98,6 +98,8 @@ export default {
     width: 100%;
   }
   &-body {
+    max-height: min(60vh, 24rem);
+    overflow-y: auto;
     > p {
       margin-bottom: 1em;
       &:nth-last-child(2) { /* matches the first <p> when there are two <p> in multiline mode */

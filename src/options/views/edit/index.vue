@@ -15,7 +15,7 @@
         </div>
       </nav>
       <div class="edit-name text-center ellipsis flex-1">
-        <span class="subtle" v-if="script.config.removed" v-text="i18n('headerRecycleBin') + ' / '"/>
+        <span class="subtle" v-if="script?.config?.removed" v-text="i18n('headerRecycleBin') + ' / '"/>
         {{scriptName}}
       </div>
       <p v-if="frozen && nav === 'code'" v-text="i18n('readonly')"
@@ -59,6 +59,7 @@
       ref="$code"
       v-show="nav === 'code'"
       :active="nav === 'code'"
+      :utility-require-refs="utilityRequireRefs"
       :commands
       @code-dirty="codeDirty = $event"
     />
@@ -76,8 +77,17 @@
     <vm-externals
       class="flex-auto"
       v-else-if="nav === EXTERNALS"
+      ref="$externals"
       :value="script"
+      :scripts="store.scripts"
       :updatedDep
+      :read-only="frozen"
+      @dirty="onExternalsDirty"
+    />
+    <vm-utility-used-by
+      class="edit-body"
+      v-else-if="nav === USED_BY"
+      :script
     />
     <vm-help
       class="edit-body"
@@ -111,7 +121,7 @@ import {
 } from '@/common';
 import { ERR_BAD_PATTERN, VM_DOCS_MATCHING, VM_HOME, kOrigTag, kTag } from '@/common/consts';
 import { deepCopy, deepEqual, objectPick } from '@/common/object';
-import { externalEditorInfoUrl, focusMe, getActiveElement, showMessage } from '@/common/ui';
+import { externalEditorInfoUrl, focusMe, getActiveElement, showConfirmation, showMessage } from '@/common/ui';
 import { keyboardService } from '@/common/keyboard';
 import options from '@/common/options';
 import { getUnloadSentry } from '@/common/router';
@@ -123,6 +133,7 @@ import {
 } from '../../utils';
 
 const EXTERNALS = 'externals';
+const USED_BY = 'usedBy';
 const CUSTOM_PROPS = {
   [kComment]: '',
   [kName]: '',
@@ -145,7 +156,7 @@ const CUSTOM_LISTS = [
   kTag,
 ];
 const toList = text => (
-  text.trim()
+  text?.trim()
     ? text.split('\n').map(line => line.trim()).filter(Boolean)
     : null // `null` removes the prop from script object
 );
@@ -181,6 +192,13 @@ import VmSettings from './settings';
 import VMSettingsUpdate from './settings-update';
 import VmValues from './values';
 import VmHelp from './help';
+import VmUtilityUsedBy from './utility-used-by';
+import { isUtilityScript } from '@/common/utility-meta';
+import {
+  buildUtilityToUserScriptWarningMessage,
+  findUtilityConsumers,
+  listUtilityRequireRefs,
+} from '@/common/utility-consumers';
 
 let CM;
 let $codeComp;
@@ -199,7 +217,9 @@ const props = defineProps({
 });
 
 const $code = ref();
+const $externals = ref();
 const $tabBody = ref();
+const externalsDirty = ref(false);
 const nav = ref('code');
 const canSave = ref(false);
 const script = ref();
@@ -213,66 +233,9 @@ const depsProgress = ref('');
 const updatedDep = ref('');
 const hotkeys = ref();
 const errors = ref();
-const errorsLinks = computed(() => {
-  let patterns = 0;
-  const errorsValue = errors.value;
-  for (const e of errorsValue) if (e.startsWith(ERR_BAD_PATTERN)) patterns++;
-  return [
-    patterns < errorsValue.length && `${VM_HOME}api/metadata-block/`,
-    patterns && VM_DOCS_MATCHING,
-  ].filter(Boolean);
-});
-const hashPattern = computed(() => { // eslint-disable-line vue/return-in-computed-property
-  for (const sectionKey of ['meta', 'custom']) {
-    for (const key of CUSTOM_LISTS) {
-      let val = script.value[sectionKey][key];
-      if (val && (
-        isObject(val)
-          ? val = val.find(reHASH.test, reHASH)
-          : val = extractLine(val, val.indexOf('#'), 100)
-      )) {
-        return val.length > 100 ? val.slice(0, 100) + '...' : val;
-      }
-      if (key === kExcludeMatch) break; // the last key for site targets
-    }
-  }
-});
-const fatal = ref();
-const frozen = ref(false);
-const frozenNote = ref(false);
-
-const navItems = computed(() => {
-  const { meta, props: { id }, $cache = {} } = script.value;
-  const req = meta.require.length && '@require';
-  const res = !isEmpty(meta.resources) && '@resource';
-  const size = $cache[kStorageSize];
-  return {
-    code: i18n('editNavCode'),
-    settings: i18n('editNavSettings'),
-    ...id && (size || isGmStorageGranted(meta)) && {
-      values: i18n('editNavValues') + (size ? ` (${formatByteLength(size)})` : ''),
-    },
-    ...(req || res) && { [EXTERNALS]: [req, res]::trueJoin('/') },
-    help: '?',
-  };
-});
-const scriptName = computed(() => (store.title = getScriptName(script.value)));
-const toggleUnloadSentry = getUnloadSentry(null, () => CM.focus());
-
-watch(nav, async val => {
-  await nextTick();
-  if (val === 'code') CM.focus();
-  else focusMe($tabBody.value.$el);
-}, { immediate: true });
-watch(canSave, val => {
-  toggleUnloadSentry(val);
-  keyboardService.setContext('canSave', val);
-});
-watch(codeDirty, onDirty);
-watch(script, onScript);
 
 {
-  // The eslint rule is bugged as this is a block scope, not a global scope.
+  // Initialize before computeds/watchers that read `script` (e.g. watch(navItems)).
   const src = props.initial;
   const initialCode = code.value = props.initialCode;
   script.value = deepCopy(src);
@@ -291,6 +254,83 @@ watch(script, onScript);
     if (savedCopy) savedCopy.config.enabled = val;
   });
 }
+
+const errorsLinks = computed(() => {
+  let patterns = 0;
+  const errorsValue = errors.value;
+  for (const e of errorsValue) if (e.startsWith(ERR_BAD_PATTERN)) patterns++;
+  return [
+    patterns < errorsValue.length && `${VM_HOME}api/metadata-block/`,
+    patterns && VM_DOCS_MATCHING,
+  ].filter(Boolean);
+});
+const hashPattern = computed(() => { // eslint-disable-line vue/return-in-computed-property
+  const scr = script.value;
+  if (!scr) return;
+  for (const sectionKey of ['meta', 'custom']) {
+    for (const key of CUSTOM_LISTS) {
+      let val = scr[sectionKey][key];
+      if (val && (
+        isObject(val)
+          ? val = val.find(reHASH.test, reHASH)
+          : val = extractLine(val, val.indexOf('#'), 100)
+      )) {
+        return val.length > 100 ? val.slice(0, 100) + '...' : val;
+      }
+      if (key === kExcludeMatch) break; // the last key for site targets
+    }
+  }
+});
+const fatal = ref();
+const frozen = ref(false);
+const frozenNote = ref(false);
+
+const navItems = computed(() => {
+  const scr = script.value;
+  if (!scr?.meta) {
+    return { code: i18n('editNavCode'), help: '?' };
+  }
+  const { meta, props: { id }, $cache = {} } = scr;
+  const utility = isUtilityScript(meta);
+  const consumerCount = utility && findUtilityConsumers(store.scripts, meta, { excludeId: id }).length;
+  const reqUtil = meta.requireUtility?.length && '@require-utility';
+  const req = meta.require?.length && '@require';
+  const res = !isEmpty(meta.resources) && '@resource';
+  const size = $cache[kStorageSize];
+  return {
+    code: i18n('editNavCode'),
+    ...utility && {
+      [USED_BY]: consumerCount ? `Used by (${consumerCount})` : 'Used by',
+    },
+    ...!utility && { settings: i18n('editNavSettings') },
+    ...id && !utility && (size || isGmStorageGranted(meta)) && {
+      values: i18n('editNavValues') + (size ? ` (${formatByteLength(size)})` : ''),
+    },
+    ...(reqUtil || req || res) && { [EXTERNALS]: [reqUtil, req, res]::trueJoin('/') },
+    help: '?',
+  };
+});
+const scriptName = computed(() => {
+  if (!script.value) return '';
+  return store.title = getScriptName(script.value);
+});
+const utilityRequireRefs = computed(() => listUtilityRequireRefs(store.scripts));
+const toggleUnloadSentry = getUnloadSentry(null, () => CM.focus());
+
+watch(navItems, items => {
+  if (script.value && !items[nav.value]) nav.value = 'code';
+});
+watch(nav, async val => {
+  await nextTick();
+  if (val === 'code') CM?.focus();
+  else if (val !== 'settings' && val !== USED_BY) focusMe($tabBody.value?.$el);
+}, { immediate: true });
+watch(canSave, val => {
+  toggleUnloadSentry(val);
+  keyboardService.setContext('canSave', val);
+});
+watch(codeDirty, onDirty);
+watch(script, onScript, { immediate: true });
 
 onMounted(() => {
   $codeComp = $code.value;
@@ -335,18 +375,49 @@ async function clipboardPaste() {
   // not using setValue because our `dirty` handler reserves it for the initial unchanged code
   CM.replaceRange(await navigator.clipboard.readText(), {line: 0, ch: 0}, {line: 1e99, ch: 0}, 'paste');
 }
+async function confirmUtilityToUserScript(code) {
+  if (!savedCopy || !isUtilityScript(savedCopy.meta)) return true;
+  const { meta: newMeta } = await sendCmdDirectly('ParseMeta', { code });
+  if (!newMeta || newMeta.utilityScript) return true;
+  const consumers = findUtilityConsumers(store.scripts, savedCopy.meta, {
+    excludeId: savedCopy.props.id,
+  });
+  const message = buildUtilityToUserScriptWarningMessage(
+    savedCopy.meta,
+    consumers,
+    getScriptName,
+  );
+  return await showConfirmation(message, {
+    ok: { text: 'Save anyway' },
+    cancel: { text: i18n('buttonCancel') },
+  });
+}
+
 async function save() {
   if (!canSave.value) return;
   if (shouldSavePositionOnSave) savePosition();
+  if (externalsDirty.value) {
+    const ok = await $externals.value?.saveCurrentLocalUtility();
+    if (!ok && !codeDirty.value && deepEqual(script.value, savedCopy)) {
+      return;
+    }
+  }
   const scr = script.value;
+  const scriptDirty = codeDirty.value || !deepEqual(scr, savedCopy);
+  if (!scriptDirty) {
+    canSave.value = externalsDirty.value;
+    return;
+  }
   const { config, custom } = scr;
   const { notifyUpdates } = config;
   const { noframes } = custom;
+  const code = $codeComp.getRealContent();
+  if (!await confirmUtilityToUserScript(code)) return;
   try {
     const id = scr.props.id;
     const res = await sendCmdDirectly('ParseScript', {
       id,
-      code: $codeComp.getRealContent(),
+      code,
       config: {
         enabled: +config.enabled,
         httpOnly: +config.httpOnly,
@@ -415,8 +486,14 @@ function onChange(evt) {
   frozenNote.value = !removed && (fz || remoteMode >= 1);
   if (!removed && evt) onDirty();
 }
+function onExternalsDirty(val) {
+  externalsDirty.value = val;
+  onDirty();
+}
 function onDirty() {
-  canSave.value = codeDirty.value || !deepEqual(script.value, savedCopy);
+  canSave.value = codeDirty.value
+    || !deepEqual(script.value, savedCopy)
+    || externalsDirty.value;
 }
 function onScript(scr) {
   const { custom, config } = scr;

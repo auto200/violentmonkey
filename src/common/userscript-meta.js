@@ -1,4 +1,6 @@
-import { HOMEPAGE_URL, SUPPORT_URL, TL_AWAIT, UNWRAP, kTag } from '@/common/consts';
+import {
+  HOMEPAGE_URL, SUPPORT_URL, TL_AWAIT, UNWRAP, kTag,
+} from '@/common/consts';
 
 const arrayType = {
   default: () => [],
@@ -22,6 +24,7 @@ export const metaTypes = {
   match: arrayType,
   excludeMatch: arrayType,
   require: arrayType,
+  requireUtility: arrayType,
   resource: {
     default: () => ({}),
     transform: (res, val) => {
@@ -64,3 +67,6 @@ export const USERSCRIPT_META_HEADERS = [
 ]
   .map(prop => prop.replace(/[A-Z](?=[a-z])/g, s => '-' + s.toLowerCase()))
   .sort((a, b) => a.localeCompare(b));
+
+/** Header names allowed in `// ==UtilityScript==` blocks. */
+export const UTILITY_META_HEADERS = ['description', 'name', 'namespace', 'version'];

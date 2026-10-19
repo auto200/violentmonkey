@@ -7,8 +7,8 @@
         <span v-text="i18n('buttonEnable')"/>
       </label>
     </div>
-    <VMSettingsUpdate v-bind="{script}" class="mb-2"/>
-    <div class="mb-2" v-if="hasGmCookie || config.httpOnly">
+    <VMSettingsUpdate v-if="!isUtility" v-bind="{script}" class="mb-2"/>
+    <div class="mb-2" v-if="!isUtility && (hasGmCookie || config.httpOnly)">
       <label>
         <input type="checkbox" v-model="config.httpOnly">
         <tooltip :content="i18n('labelHttpOnlyCookieHint')">{{
@@ -16,8 +16,8 @@
         }}</tooltip>
       </label>
     </div>
-    <h4 v-text="i18n('editLabelMeta')"></h4>
-    <dl class="grid3">
+    <h4 v-if="!isUtility" v-text="i18n('editLabelMeta')"></h4>
+    <dl v-if="!isUtility" class="grid3">
       <dd>
         <code>@run-at</code>
       </dd>
@@ -70,7 +70,7 @@
         </dd>
       </template>
     </dl>
-    <dl class="grid2">
+    <dl v-if="!isUtility" class="grid2">
       <template v-for="([ name, orig, labelA, code, labelB ]) in textAreas" :key="name">
         <dd>
           <p>
@@ -108,6 +108,7 @@ import { computed, nextTick, onActivated, onDeactivated, ref, shallowRef } from 
 import Tooltip from 'vueleton/lib/tooltip';
 import { getScriptHome, i18n } from '@/common';
 import { ESC_STR_RE, KNOWN_INJECT_INTO, kOrigTag, kTag } from '@/common/consts';
+import { isUtilityScript } from '@/common/utility-meta';
 import hookSetting from '@/common/hook-setting';
 import { objectPick } from '@/common/object';
 import { kGmCookieHttpOnly } from '@/common/options-defaults';
@@ -127,6 +128,7 @@ const KII = shallowRef(KNOWN_INJECT_INTO);
 const highlightMetaKeys = str => str.match(/^(.*?)(@[-a-z]+)(.*)/)?.slice(1) || [str, '', ''];
 const config = computed(() => props.script.config);
 const custom = computed(() => props.script.custom);
+const isUtility = computed(() => isUtilityScript(props.script.meta));
 const hasGmCookie = computed(() => {
   const { grant } = props.script.meta;
   return grant.includes('GM_cookie') || grant.includes('GM.cookie');
@@ -168,9 +170,9 @@ onActivated(() => {
         : '\n' + i18n('labelScriptOptionRequiredGlobal');
     }),
   ];
-  if (!tagsInput) {
+  if (!tagsInput && !isUtility.value) {
     tagsInput = document.querySelector(`[data-area="${kTag}"]`);
-    tagsInput.onfocus = onTagsFocused;
+    if (tagsInput) tagsInput.onfocus = onTagsFocused;
   }
 });
 onDeactivated(() => {

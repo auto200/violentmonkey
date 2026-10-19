@@ -1,6 +1,6 @@
 import CodeMirror from 'codemirror';
 import { defaultsEditor, kAutocompleteOnTyping as ID } from '@/common/options-defaults';
-import { isInUserScriptMetaBlock } from './code-userscript-hint';
+import { isInUserScriptMetaBlock, isRequireUtilityValueContext } from './code-userscript-hint';
 
 const OPTIONS = 'options';
 const STATE = 'state';
@@ -44,8 +44,9 @@ const onChanges = (cm, [info]) => {
     myState[PICKED] = false;
     return;
   }
-  if (/[-a-z!]$/i.test(lastTyped)
-  || lastTyped === '@' && isInUserScriptMetaBlock(cm)) {
+  if (/[-a-z!/]$/i.test(lastTyped)
+  || lastTyped === '@' && isInUserScriptMetaBlock(cm)
+  || lastTyped === ' ' && isRequireUtilityValueContext(cm)) {
     cancelDelay(myState);
     myState[TIMER] = setTimeout(delayedComplete, cm[OPTIONS][ID], cm);
   }

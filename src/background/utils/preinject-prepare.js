@@ -1,8 +1,9 @@
 import { getScriptName, getScriptPrettyUrl, getUniqId, leaseBlobUrl } from '@/common';
 import {
-  __CODE, CACHE_KEYS, HOMEPAGE_URL, kDownloadMode, KNOWN_INJECT_INTO, kOrigTag, kTag, META_STR,
-  METABLOCK_RE, NEWLINE_END_RE, PROMISE, TL_AWAIT, UNWRAP,
+  __CODE, CACHE_KEYS, HOMEPAGE_URL, kDownloadMode, kRequireUtility, KNOWN_INJECT_INTO, kOrigTag,
+  kTag, META_STR, METABLOCK_RE, NEWLINE_END_RE, PROMISE, TL_AWAIT, UNWRAP,
 } from '@/common/consts';
+import { utilityRequireKey } from '@/common/utility-require';
 import { deepSize, forEachValue, mapEntry, objectPick } from '@/common/object';
 import { getScriptsByURL, kTryVacuuming } from './db';
 import { registerDnrBlob } from './dnr';
@@ -222,7 +223,22 @@ function prepareScript(script, env) {
       '(define,module,exports)=>{');
   }
   tmp = false;
-  for (const url of meta[S_REQUIRE]) {
+  for (const ref of meta[kRequireUtility] || []) {
+    const key = utilityRequireKey(ref);
+    const req = require[pathMap[key] || key] || `/* ${VIOLENTMONKEY} is missing @require-utility ${
+      ref.replace(/\*\//g, '%2A/')
+    }\n${kTryVacuuming} */`;
+    if (/\S/.test(req)) {
+      size += req.length;
+      injectedCode.push(...[
+        tmp && isUnsafeConcat(req) && ';',
+        req,
+        !NEWLINE_END_RE.test(req) && '\n',
+      ].filter(Boolean));
+      tmp = true;
+    }
+  }
+  for (const url of meta[S_REQUIRE] || []) {
     const req = require[pathMap[url] || url] || `/* ${VIOLENTMONKEY} is missing @require ${
       url.replace(/\*\//g, '%2A/')
     }\n${kTryVacuuming} */`;

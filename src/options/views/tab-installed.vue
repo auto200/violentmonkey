@@ -122,6 +122,9 @@
                 <SettingCheck name="filters.viewTable" :label="i18n('labelViewTable')" />
                 <SettingCheck name="filters.viewSingleColumn" :label="i18n('labelViewSingleColumn')" />
               </div>
+              <div>
+                <SettingCheck name="filters.showUtilitiesOnly" label="Utilities only" />
+              </div>
             </template>
           </Dropdown>
         </div>
@@ -209,7 +212,8 @@ import SettingCheck from '@/common/ui/setting-check';
 import { customCssElem, onMediaWidth, NARROW_WIDTH } from '@/common/ui/style';
 import { getSortCollator } from '@/common/ui/util';
 import {
-  createSearchRules, filteredScripts, formatSizesStr, markRemove, performSearch, runInBatch, setLocationHash,
+  createSearchRules, filterUtilityScripts, filteredScripts, formatSizesStr, markRemove, performSearch,
+  runInBatch, setLocationHash,
   SIZE_TITLES, sortedScripts, store, TOGGLE_OFF, TOGGLE_ON,
 } from '../utils';
 import toggleDragging from '../utils/dragging';
@@ -217,9 +221,15 @@ import ScriptItem from './script-item';
 import Edit from './edit';
 
 const handleNewScript = () => handleEditScript('_new');
+const handleNewUtilityScript = () => {
+  newScriptUtility = true;
+  handleEditScript('_new');
+};
 const NEW_LINKS = [
   [i18n('buttonNew'),
     { tabIndex: 0, onclick: handleNewScript }],
+  ['New utility',
+    { tabIndex: 0, onclick: handleNewUtilityScript }],
   [i18n('buttonNewFromFile'),
     { tabIndex: 0, onclick: handleNewScriptFromFile }],
   [i18n('installFrom', 'OpenUserJS'),
@@ -274,6 +284,7 @@ const filters = reactive({
   /** @type {Boolean} */ showVisit: null,
   /** @type {Boolean} */ viewSingleColumn: null,
   /** @type {Boolean} */ viewTable: null,
+  /** @type {Boolean} */ showUtilitiesOnly: null,
   sort: '',
 });
 filters::forEachKey(key => {
@@ -312,6 +323,7 @@ let columnsForCardsMode = [];
 let scrollTop1, scrollTop2;
 
 let newScriptCode;
+let newScriptUtility;
 
 const $menuNew = ref();
 const isEmpty = ref();
@@ -442,7 +454,8 @@ function sortScripts(scripts) {
 }
 /** @param onlyReorder - only set when invoked from watch() for options that reorder the list */
 function onUpdate(onlyReorder) {
-  const scripts = [...getCurrentList()];
+  let scripts = [...getCurrentList()];
+  scripts = filterUtilityScripts(scripts, filters.showUtilitiesOnly);
   if (!onlyReorder) performSearch(scripts);
   sortScripts(scripts);
   filteredScripts.value = !onlyReorder && state.search.rules.length
@@ -524,6 +537,7 @@ async function onHashChange() {
   if (__.MV3 && id) store.busyId = id;
   const _new = id === '_new' && await sendCmdDirectly('NewScript', {
     code: newScriptCode,
+    ...newScriptUtility && { utility: true },
     .../^\d+$/.test(tabId) && { tabId: +tabId },
   });
   const script = _new || +id && getCurrentList().find(s => s.props.id === +id);
@@ -540,6 +554,7 @@ async function onHashChange() {
     state.script = script;
   }
   newScriptCode = '';
+  newScriptUtility = false;
   if (__.MV3 && id) store.busyId = 0;
   if (script) return;
   // Strip the invalid id from the URL so |App| can render the aside,
@@ -850,6 +865,7 @@ watch(() => store.canRenderScripts && refList.value && draggableRaw.value,
   dr => toggleDragging(refList.value, moveScript, dr));
 watch(() => state.search.value, debouncedSearch);
 watch(() => [filters.sort, filters.showEnabledFirst], lazyOrderUpdate);
+watch(() => filters.showUtilitiesOnly, () => onUpdate());
 disposables.push(
   watch(() => filters.viewSingleColumn, adjustScriptWidth),
   watch(() => filters.viewTable, adjustNarrowWidth, { immediate: true }),

@@ -8,6 +8,7 @@ export const SUPPORT_URL = 'supportURL';
 
 /** A relaxed check, see METABLOCK_RE description */
 export const USERSCRIPT_META_INTRO = '==UserScript==';
+export const UTILITY_SCRIPT_META_INTRO = '==UtilityScript==';
 /** A strictly valid metablock should start at the beginning of the line:
  * "// ==UserScript==" with exactly one \x20 space inside.
  * To match Tampermonkey's relaxed parsing, we allow any preceding text at line start
@@ -20,6 +21,14 @@ export const METABLOCK_RE = regex({ disable: { n: true } })`
   ([\s\S]*?\n)
 # 5  6          7
   ((.*?)\/\/([\x20\t]*)==\/UserScript==)
+`;
+export const UTILITY_METABLOCK_RE = regex({ disable: { n: true } })`
+# 1          2           3
+  ((?:^|\n)(.*?)\/\/([\x20\t]*)==UtilityScript==)
+# 4
+  ([\s\S]*?\n)
+# 5  6          7
+  ((.*?)\/\/([\x20\t]*)==\/UtilityScript==)
 `;
 export const META_STR = 'metaStr';
 export const ESC_GLOB_RE = /[\\.?+[\]{}()|^$]/g;
@@ -49,6 +58,15 @@ export const __CODE = /*@__PURE__*/Symbol('code'); // not enumerable and strippe
 export const UA_PROPS = ['userAgent', 'brands', 'mobile', 'platform'];
 export const TL_AWAIT = 'topLevelAwait';
 export const UNWRAP = 'unwrap';
+export const kUtilityScript = 'utilityScript';
+export const kRequireUtility = 'requireUtility';
+/** Allowed `meta` keys when {@link kUtilityScript} is set. */
+export const UTILITY_META_KEYS = new Set([
+  'name',
+  'namespace',
+  'version',
+  'description',
+]);
 export const FETCH_OPTS = 'fetchOpts';
 export const ERR_BAD_PATTERN = 'Bad pattern';
 export const VM_HOME = 'https://violentmonkey.github.io/';
